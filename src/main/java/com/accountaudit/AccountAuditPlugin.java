@@ -22,6 +22,7 @@ import net.runelite.api.ItemContainer;
 import net.runelite.api.Quest;
 import net.runelite.api.QuestState;
 import net.runelite.api.Skill;
+import net.runelite.api.Varbits;
 import net.runelite.client.callback.ClientThread;
 import net.runelite.client.config.ConfigManager;
 import net.runelite.client.eventbus.Subscribe;
@@ -346,6 +347,8 @@ public class AccountAuditPlugin extends Plugin
 		delta.add("quests", quests);
 		delta.add("levels", levels);
 		delta.add("equipment", equipment);
+		delta.add("diaries", collectDiaries());
+		delta.add("personalBests", collectPersonalBests());
 		// Quest points varp (101) — stable id; gameval constant is VarPlayerID.QP on new APIs.
 		delta.addProperty("questPoints", client.getVarpValue(101));
 		if (client.getLocalPlayer() != null && client.getLocalPlayer().getName() != null)
@@ -412,6 +415,72 @@ public class AccountAuditPlugin extends Plugin
 				}
 			}
 		});
+	}
+
+	/** Achievement diary TIER completion (per-task capture is a later, bigger job). */
+	private JsonObject collectDiaries()
+	{
+		JsonObject diaries = new JsonObject();
+		int[][] varbits = {
+			{Varbits.DIARY_ARDOUGNE_EASY, Varbits.DIARY_ARDOUGNE_MEDIUM, Varbits.DIARY_ARDOUGNE_HARD, Varbits.DIARY_ARDOUGNE_ELITE},
+			{Varbits.DIARY_DESERT_EASY, Varbits.DIARY_DESERT_MEDIUM, Varbits.DIARY_DESERT_HARD, Varbits.DIARY_DESERT_ELITE},
+			{Varbits.DIARY_FALADOR_EASY, Varbits.DIARY_FALADOR_MEDIUM, Varbits.DIARY_FALADOR_HARD, Varbits.DIARY_FALADOR_ELITE},
+			{Varbits.DIARY_FREMENNIK_EASY, Varbits.DIARY_FREMENNIK_MEDIUM, Varbits.DIARY_FREMENNIK_HARD, Varbits.DIARY_FREMENNIK_ELITE},
+			{Varbits.DIARY_KANDARIN_EASY, Varbits.DIARY_KANDARIN_MEDIUM, Varbits.DIARY_KANDARIN_HARD, Varbits.DIARY_KANDARIN_ELITE},
+			{Varbits.DIARY_KARAMJA_EASY, Varbits.DIARY_KARAMJA_MEDIUM, Varbits.DIARY_KARAMJA_HARD, Varbits.DIARY_KARAMJA_ELITE},
+			{Varbits.DIARY_KOUREND_EASY, Varbits.DIARY_KOUREND_MEDIUM, Varbits.DIARY_KOUREND_HARD, Varbits.DIARY_KOUREND_ELITE},
+			{Varbits.DIARY_LUMBRIDGE_EASY, Varbits.DIARY_LUMBRIDGE_MEDIUM, Varbits.DIARY_LUMBRIDGE_HARD, Varbits.DIARY_LUMBRIDGE_ELITE},
+			{Varbits.DIARY_MORYTANIA_EASY, Varbits.DIARY_MORYTANIA_MEDIUM, Varbits.DIARY_MORYTANIA_HARD, Varbits.DIARY_MORYTANIA_ELITE},
+			{Varbits.DIARY_VARROCK_EASY, Varbits.DIARY_VARROCK_MEDIUM, Varbits.DIARY_VARROCK_HARD, Varbits.DIARY_VARROCK_ELITE},
+			{Varbits.DIARY_WESTERN_EASY, Varbits.DIARY_WESTERN_MEDIUM, Varbits.DIARY_WESTERN_HARD, Varbits.DIARY_WESTERN_ELITE},
+			{Varbits.DIARY_WILDERNESS_EASY, Varbits.DIARY_WILDERNESS_MEDIUM, Varbits.DIARY_WILDERNESS_HARD, Varbits.DIARY_WILDERNESS_ELITE},
+		};
+		String[] regions = {"ardougne", "desert", "falador", "fremennik", "kandarin", "karamja", "kourend", "lumbridge", "morytania", "varrock", "western", "wilderness"};
+		String[] tiers = {"easy", "medium", "hard", "elite"};
+		for (int r = 0; r < regions.length; r++)
+		{
+			for (int t = 0; t < tiers.length; t++)
+			{
+				diaries.addProperty(regions[r] + "-" + tiers[t], client.getVarbitValue(varbits[r][t]) == 1);
+			}
+		}
+		return diaries;
+	}
+
+	/**
+	 * Personal bests recorded by RuneLite's own chat-commands plugin (kill times in
+	 * seconds, stored per RS profile). Read-only reuse of data the player already has;
+	 * raid points/team sizes aren't stored client-side, so those stay manual for now.
+	 */
+	private JsonObject collectPersonalBests()
+	{
+		String[] bosses = {
+			"chambers of xeric", "chambers of xeric challenge mode",
+			"theatre of blood", "theatre of blood hard mode",
+			"tombs of amascut", "tombs of amascut expert mode",
+			"zulrah", "vorkath", "grotesque guardians", "alchemical hydra",
+			"gauntlet", "corrupted gauntlet", "fight cave", "inferno",
+			"phantom muspah", "nightmare", "phosani's nightmare",
+			"hallowed sepulchre", "duke sucellus", "the leviathan",
+			"the whisperer", "vardorvis", "fragment of seren", "sol heredit",
+		};
+		JsonObject pbs = new JsonObject();
+		for (String boss : bosses)
+		{
+			try
+			{
+				Double pb = configManager.getRSProfileConfiguration("personalbest", boss, double.class);
+				if (pb != null && pb > 0)
+				{
+					pbs.addProperty(boss, pb);
+				}
+			}
+			catch (RuntimeException ignored)
+			{
+				// unparseable legacy value — skip
+			}
+		}
+		return pbs;
 	}
 
 	// ---------- side panel ----------
