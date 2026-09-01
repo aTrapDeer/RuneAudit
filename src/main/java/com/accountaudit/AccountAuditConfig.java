@@ -92,6 +92,6 @@ public interface AccountAuditConfig extends Config
 	)
 	default String apiBase()
 	{
-		return "http://localhost:3000";
+		return "https://osrs-accountaudit.vercel.app";
 	}
 }
