@@ -23,12 +23,13 @@ public class AccountAuditPanel extends PluginPanel
 	private final JTextField codeField = new JTextField();
 	private final JButton linkButton = new JButton("Link");
 	private final JButton syncButton = new JButton("Sync now");
+	private final JButton bankButton = new JButton("Sync bank");
 	private final JPanel linkRow = new JPanel();
 	private final JPanel stepsPanel = new JPanel();
 	private final JLabel suggestionTitle = new JLabel();
 	private final JLabel suggestion = new JLabel();
 
-	AccountAuditPanel(Runnable onRefresh, Consumer<String> onLink, Runnable onSyncNow)
+	AccountAuditPanel(Runnable onRefresh, Consumer<String> onLink, Runnable onSyncNow, Runnable onSyncBank)
 	{
 		setLayout(new BorderLayout(0, 8));
 		setBorder(BorderFactory.createEmptyBorder(10, 10, 10, 10));
@@ -69,6 +70,11 @@ public class AccountAuditPanel extends PluginPanel
 		content.add(syncButton);
 		content.add(Box.createVerticalStrut(4));
 
+		bankButton.setToolTipText("Sends your bank contents to YOUR private profile (encrypted) so the site can value it and suggest gear upgrades. Open your bank once this session first.");
+		bankButton.addActionListener(e -> onSyncBank.run());
+		content.add(bankButton);
+		content.add(Box.createVerticalStrut(4));
+
 		JButton refresh = new JButton("Refresh plan");
 		refresh.addActionListener(e -> onRefresh.run());
 		content.add(refresh);
@@ -89,6 +95,7 @@ public class AccountAuditPanel extends PluginPanel
 		{
 			linkRow.setVisible(!linked);
 			syncButton.setVisible(linked);
+			bankButton.setVisible(linked);
 			if (linked)
 			{
 				codeField.setText("");

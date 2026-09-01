@@ -124,7 +124,8 @@ public class AccountAuditPlugin extends Plugin
 				panel.showStatus("Syncing…");
 				syncQueued = false;
 				collectAndSend(true);
-			}));
+			}),
+			() -> clientThread.invokeLater(this::syncBankNow));
 		navButton = NavigationButton.builder()
 			.tooltip("Account Audit")
 			.icon(drawIcon())
@@ -175,15 +176,23 @@ public class AccountAuditPlugin extends Plugin
 	@Subscribe
 	public void onItemContainerChanged(ItemContainerChanged event)
 	{
-		// Bank capture: opt-in only, and only possible while the bank is actually open.
+		// Automatic bank capture: opt-in toggle, fires while the bank is open.
 		if (!config.bankSync() || event.getContainerId() != InventoryID.BANK.getId())
 		{
 			return;
 		}
-		ItemContainer bankContainer = event.getItemContainer();
+		if (captureBank(event.getItemContainer()))
+		{
+			syncQueued = true;
+		}
+	}
+
+	/** Serialize a bank container into pendingBank. Returns false when unavailable. */
+	private boolean captureBank(ItemContainer bankContainer)
+	{
 		if (bankContainer == null)
 		{
-			return;
+			return false;
 		}
 		JsonArray items = new JsonArray();
 		for (Item item : bankContainer.getItems())
@@ -199,7 +208,34 @@ public class AccountAuditPlugin extends Plugin
 			items.add(entry);
 		}
 		pendingBank = items;
-		syncQueued = true;
+		return true;
+	}
+
+	/**
+	 * The panel's Sync bank button — pressing it is explicit consent for this send.
+	 * The client keeps the bank container in memory after one visit per session, so
+	 * this works from anywhere once the bank has been opened.
+	 */
+	private void syncBankNow()
+	{
+		if (client.getGameState() != GameState.LOGGED_IN)
+		{
+			panel.showStatus("Log into the game first, then press Sync bank.");
+			return;
+		}
+		ItemContainer bank = client.getItemContainer(InventoryID.BANK);
+		if (bank == null)
+		{
+			panel.showStatus("Open your bank once this session, close it if you like, then press Sync bank again.");
+			return;
+		}
+		if (!captureBank(bank))
+		{
+			panel.showStatus("Couldn't read the bank — open it and try again.");
+			return;
+		}
+		panel.showStatus("Sending bank (" + bank.getItems().length + " slots, encrypted)…");
+		collectAndSend(true);
 	}
 
 	@Subscribe
