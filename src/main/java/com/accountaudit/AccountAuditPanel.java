@@ -2,28 +2,33 @@ package com.accountaudit;
 
 import java.awt.BorderLayout;
 import java.awt.Font;
+import java.util.function.Consumer;
 import javax.swing.BorderFactory;
 import javax.swing.Box;
 import javax.swing.BoxLayout;
 import javax.swing.JButton;
 import javax.swing.JLabel;
 import javax.swing.JPanel;
+import javax.swing.JTextField;
 import javax.swing.SwingUtilities;
 import net.runelite.client.ui.PluginPanel;
 
 /**
- * The in-client view of the active plan: next steps + one suggestion, served by
- * GET /api/plan. All strategy logic lives server-side, so knowledge-base updates
- * never require a plugin release.
+ * The in-client panel: link with an explicit button, sync with an explicit button,
+ * always-visible status. All strategy logic lives server-side.
  */
 public class AccountAuditPanel extends PluginPanel
 {
-	private final JLabel status = new JLabel("Not linked yet.");
+	private final JLabel status = new JLabel();
+	private final JTextField codeField = new JTextField();
+	private final JButton linkButton = new JButton("Link");
+	private final JButton syncButton = new JButton("Sync now");
+	private final JPanel linkRow = new JPanel();
 	private final JPanel stepsPanel = new JPanel();
 	private final JLabel suggestionTitle = new JLabel();
 	private final JLabel suggestion = new JLabel();
 
-	AccountAuditPanel(Runnable onRefresh)
+	AccountAuditPanel(Runnable onRefresh, Consumer<String> onLink, Runnable onSyncNow)
 	{
 		setLayout(new BorderLayout(0, 8));
 		setBorder(BorderFactory.createEmptyBorder(10, 10, 10, 10));
@@ -36,6 +41,19 @@ public class AccountAuditPanel extends PluginPanel
 		content.add(title);
 		content.add(Box.createVerticalStrut(6));
 		content.add(status);
+		content.add(Box.createVerticalStrut(8));
+
+		// Link row: paste the website code, press Link, watch the status line.
+		linkRow.setLayout(new BoxLayout(linkRow, BoxLayout.Y_AXIS));
+		JLabel linkLabel = new JLabel("Link code from the website:");
+		linkRow.add(linkLabel);
+		codeField.setMaximumSize(new java.awt.Dimension(Integer.MAX_VALUE, 28));
+		codeField.setToolTipText("Generate this on the website's My Accounts page while signed in");
+		linkRow.add(codeField);
+		linkRow.add(Box.createVerticalStrut(4));
+		linkButton.addActionListener(e -> onLink.accept(codeField.getText()));
+		linkRow.add(linkButton);
+		content.add(linkRow);
 		content.add(Box.createVerticalStrut(10));
 
 		stepsPanel.setLayout(new BoxLayout(stepsPanel, BoxLayout.Y_AXIS));
@@ -47,16 +65,42 @@ public class AccountAuditPanel extends PluginPanel
 		content.add(suggestion);
 		content.add(Box.createVerticalStrut(10));
 
+		syncButton.addActionListener(e -> onSyncNow.run());
+		content.add(syncButton);
+		content.add(Box.createVerticalStrut(4));
+
 		JButton refresh = new JButton("Refresh plan");
 		refresh.addActionListener(e -> onRefresh.run());
 		content.add(refresh);
 
 		add(content, BorderLayout.NORTH);
+		showStatus("Checking link…");
 	}
 
 	void showStatus(String text)
 	{
 		SwingUtilities.invokeLater(() -> status.setText(asHtml(text)));
+	}
+
+	/** Toggle the link controls: hidden once linked, shown when not. */
+	void setLinked(boolean linked)
+	{
+		SwingUtilities.invokeLater(() ->
+		{
+			linkRow.setVisible(!linked);
+			syncButton.setVisible(linked);
+			if (linked)
+			{
+				codeField.setText("");
+			}
+			revalidate();
+			repaint();
+		});
+	}
+
+	void clearCodeField()
+	{
+		SwingUtilities.invokeLater(() -> codeField.setText(""));
 	}
 
 	void showPlan(String planLine, java.util.List<String> steps, String suggestionName, String suggestionWhy)

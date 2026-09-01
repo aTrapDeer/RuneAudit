@@ -111,7 +111,20 @@ public class AccountAuditPlugin extends Plugin
 	@Override
 	protected void startUp()
 	{
-		panel = new AccountAuditPanel(this::fetchPlan);
+		panel = new AccountAuditPanel(
+			this::fetchPlan,
+			code -> clientThread.invokeLater(() -> tryClaimLinkCode(code)),
+			() -> clientThread.invokeLater(() ->
+			{
+				if (client.getGameState() != GameState.LOGGED_IN)
+				{
+					panel.showStatus("Log into the game first, then press Sync now.");
+					return;
+				}
+				panel.showStatus("Syncing…");
+				syncQueued = false;
+				collectAndSend(true);
+			}));
 		navButton = NavigationButton.builder()
 			.tooltip("Account Audit")
 			.icon(drawIcon())
@@ -199,7 +212,8 @@ public class AccountAuditPlugin extends Plugin
 		if (AccountAuditConfig.LINK_CODE_KEY.equals(event.getKey())
 			&& event.getNewValue() != null && !event.getNewValue().trim().isEmpty())
 		{
-			clientThread.invokeLater(this::tryClaimLinkCode);
+			final String code = event.getNewValue();
+			clientThread.invokeLater(() -> tryClaimLinkCode(code));
 		}
 	}
 
@@ -229,24 +243,27 @@ public class AccountAuditPlugin extends Plugin
 
 	// ---------- linking ----------
 
-	private void tryClaimLinkCode()
+	private void tryClaimLinkCode(String rawCode)
 	{
-		final String code = config.linkCode().trim();
+		final String code = rawCode == null ? "" : rawCode.trim().toUpperCase();
 		if (code.isEmpty())
 		{
+			panel.showStatus("Paste the code from the website first, then press Link.");
 			return;
 		}
 		if (client.getGameState() != GameState.LOGGED_IN || client.getLocalPlayer() == null)
 		{
-			message("Account Audit: log into the character you want to link, then re-enter the code.");
+			panel.showStatus("Log into the character you want to link, then press Link again.");
+			message("Account Audit: log into the character you want to link, then try again.");
 			return;
 		}
 		final long accountHash = client.getAccountHash();
 		if (accountHash == -1)
 		{
-			message("Account Audit: account identity not available yet — try again in a moment.");
+			panel.showStatus("Account identity not ready — wait a moment and press Link again.");
 			return;
 		}
+		panel.showStatus("Linking…");
 		final String displayName = Objects.requireNonNull(client.getLocalPlayer().getName());
 
 		JsonObject body = new JsonObject();
@@ -265,6 +282,7 @@ public class AccountAuditPlugin extends Plugin
 			public void onFailure(Call call, IOException e)
 			{
 				log.warn("Account Audit link failed", e);
+				panel.showStatus("Couldn't reach the server (" + e.getMessage() + "). Check your connection and press Link again.");
 				messageLater("Account Audit: couldn't reach the server (" + e.getMessage() + ").");
 			}
 
@@ -277,15 +295,19 @@ public class AccountAuditPlugin extends Plugin
 					if (!r.isSuccessful())
 					{
 						log.warn("Account Audit link rejected: {} {}", r.code(), responseBody);
-						messageLater("Account Audit: link failed (" + friendlyError(responseBody, r.code()) + ")");
+						String reason = friendlyError(responseBody, r.code());
+						panel.showStatus("Link failed: " + reason);
+						messageLater("Account Audit: link failed (" + reason + ")");
 						return;
 					}
 					JsonObject json = gson.fromJson(responseBody, JsonObject.class);
 					String token = json.get("pluginToken").getAsString();
 					configManager.setConfiguration(AccountAuditConfig.GROUP, AccountAuditConfig.PLUGIN_TOKEN_KEY, token);
 					configManager.setConfiguration(AccountAuditConfig.GROUP, AccountAuditConfig.LINK_CODE_KEY, "");
+					panel.setLinked(true);
+					panel.showStatus("Linked as " + displayName + " ✓ — syncing…");
 					messageLater("Account Audit: " + displayName + " linked successfully. Syncing…");
-					syncQueued = true;
+					clientThread.invokeLater(() -> collectAndSend(true));
 				}
 			}
 		});
@@ -293,16 +315,29 @@ public class AccountAuditPlugin extends Plugin
 
 	// ---------- syncing ----------
 
-	/** Must run on the client thread (reads quest state). */
 	private void collectAndSend()
+	{
+		collectAndSend(false);
+	}
+
+	/** Must run on the client thread (reads quest state). force = ignore no-change skip. */
+	private void collectAndSend(boolean force)
 	{
 		if (!config.syncProgress())
 		{
+			if (force)
+			{
+				panel.showStatus("Progress sync is disabled in the plugin settings.");
+			}
 			return;
 		}
 		final String token = config.pluginToken().trim();
 		if (token.isEmpty())
 		{
+			if (force)
+			{
+				panel.showStatus("Not linked yet — paste a code from the website above and press Link.");
+			}
 			return;
 		}
 
@@ -359,7 +394,7 @@ public class AccountAuditPlugin extends Plugin
 		// Digest covers progress only; a pending bank capture always forces a send.
 		String digest = sha256Hex(delta.toString());
 		final JsonArray bankToSend = pendingBank;
-		if (digest.equals(lastSentDigest) && bankToSend == null)
+		if (!force && digest.equals(lastSentDigest) && bankToSend == null)
 		{
 			return; // nothing changed since last sync
 		}
@@ -384,6 +419,7 @@ public class AccountAuditPlugin extends Plugin
 			@Override
 			public void onFailure(Call call, IOException e)
 			{
+				panel.showStatus("Sync failed: couldn't reach the server. Will retry automatically.");
 				log.warn("Account Audit sync failed", e);
 			}
 
@@ -399,6 +435,7 @@ public class AccountAuditPlugin extends Plugin
 						{
 							pendingBank = null;
 						}
+						panel.showStatus("Synced ✓ — loading your plan…");
 						fetchPlan();
 						log.debug("Account Audit: synced");
 					}
@@ -406,10 +443,20 @@ public class AccountAuditPlugin extends Plugin
 					{
 						log.warn("Account Audit: token revoked; clearing. Re-link from the website.");
 						configManager.setConfiguration(AccountAuditConfig.GROUP, AccountAuditConfig.PLUGIN_TOKEN_KEY, "");
+						panel.setLinked(false);
+						panel.showStatus("This link was revoked on the website — generate a new code and re-link.");
 						messageLater("Account Audit: this link was revoked — generate a new code on the website to re-link.");
 					}
-					else if (r.code() != 429) // 429 = synced too recently; silently retry later
+					else if (r.code() == 429)
 					{
+						if (force)
+						{
+							panel.showStatus("Synced very recently — wait ~30 seconds and try again.");
+						}
+					}
+					else
+					{
+						panel.showStatus("Sync failed (HTTP " + r.code() + ") — will retry automatically.");
 						log.warn("Account Audit sync rejected: {}", r.code());
 					}
 				}
@@ -494,9 +541,11 @@ public class AccountAuditPlugin extends Plugin
 		}
 		if (token.isEmpty())
 		{
-			panel.showStatus("Not linked. Generate a code on the website and paste it into this plugin's settings.");
+			panel.setLinked(false);
+			panel.showStatus("Not linked. Generate a code on the website, paste it above, and press Link.");
 			return;
 		}
+		panel.setLinked(true);
 		Request request = new Request.Builder()
 			.url(config.apiBase() + "/api/plan")
 			.header("Authorization", "Bearer " + token)
