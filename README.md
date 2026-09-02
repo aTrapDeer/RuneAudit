@@ -4,6 +4,10 @@ Syncs your own quest completion, quest points, skill levels, worn gear, diary ti
 and personal bests to your RuneAudit profile, using a link-code ownership flow (no
 credentials, ever). Exactly what is read and sent is listed in [SCOPE.md](SCOPE.md).
 
+**PvP record:** counts your player kills, deaths to players, loot keys, and PvP loot value
+from RuneLite's own events, starting when you install — a rough estimate, never a lifetime
+figure, and labelled that way on the site. Toggle it off in settings if you don't want it.
+
 **Bank:** off by default. When you press *Sync bank* (or enable auto-sync), the plugin
 sends a *summary* only — total GE value, stack count, and which items from the public
 [items-of-interest list](https://osrs-accountaudit.vercel.app/api/items-of-interest)

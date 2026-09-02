@@ -24,7 +24,15 @@ import net.runelite.api.ItemContainer;
 import net.runelite.api.Quest;
 import net.runelite.api.QuestState;
 import net.runelite.api.Skill;
+import net.runelite.api.Actor;
+import net.runelite.api.Player;
 import net.runelite.api.Varbits;
+import net.runelite.api.WorldType;
+import net.runelite.api.events.ActorDeath;
+import net.runelite.api.events.InteractingChanged;
+import net.runelite.api.gameval.ItemID;
+import net.runelite.client.events.PlayerLootReceived;
+import net.runelite.client.game.ItemStack;
 import net.runelite.client.callback.ClientThread;
 import net.runelite.client.config.ConfigManager;
 import net.runelite.client.eventbus.Subscribe;
@@ -63,7 +71,8 @@ import com.google.inject.Provides;
  * - Never touches credentials. Linking uses a short-lived code the player generates
  *   while signed into the website, pasted here — proof of control of both sides.
  * - Sends only what the consent toggles cover: quest states, quest points, levels,
- *   worn gear, diaries, personal bests — and, separately opted in, a bank SUMMARY
+ *   worn gear, diaries, personal bests, an approximate PvP record — and, separately
+ *   opted in, a bank SUMMARY
  *   (total value + which published items-of-interest are present), never the bank.
  * - The account is identified by a SHA-256 of RuneLite's account hash — the raw
  *   value never leaves the client.
@@ -105,6 +114,10 @@ public class AccountAuditPlugin extends Plugin
 	/** Hash of the last payload we sent, to skip no-change syncs. */
 	private String lastSentDigest = null;
 	private boolean syncQueued = false;
+	/** Loot keys in the inventory at the last look; -1 = not yet observed this login. */
+	private int lastLootKeyCount = -1;
+	/** Last game tick a player targeted us — used to attribute an ambiguous death. */
+	private int lastPlayerAggroTick = -1000;
 	/**
 	 * Bank SUMMARY captured on the last bank-open, awaiting the next sync. Opt-in.
 	 * Holds total value, stack counts, and which items-of-interest are present —
@@ -185,12 +198,152 @@ public class AccountAuditPlugin extends Plugin
 		{
 			// Quest states settle a few ticks after login; the scheduled sync picks it up.
 			syncQueued = true;
+			lastLootKeyCount = -1;
 		}
+	}
+
+	// ---------- PvP record: approximate, counted client-side since install ----------
+	//
+	// The game exposes no lifetime PK counter, so this is built from RuneLite's own
+	// events: PlayerLootReceived (a kill you looted), ActorDeath on yourself while a
+	// player was involved, and loot keys appearing in the inventory. Counts persist per
+	// RS profile in RuneLite's config and are sent under the progress consent toggle.
+	// Missed kills (client closed, loot not picked up) are expected; the site says so.
+
+	private static final int[] LOOT_KEYS = {
+		ItemID.WILDY_LOOT_KEY0, ItemID.WILDY_LOOT_KEY1, ItemID.WILDY_LOOT_KEY2,
+		ItemID.WILDY_LOOT_KEY3, ItemID.WILDY_LOOT_KEY4,
+	};
+
+	private static boolean isLootKey(int itemId)
+	{
+		for (int key : LOOT_KEYS)
+		{
+			if (key == itemId)
+			{
+				return true;
+			}
+		}
+		return false;
+	}
+
+	private long pvpStat(String key)
+	{
+		Long value = configManager.getRSProfileConfiguration(AccountAuditConfig.GROUP, key, long.class);
+		return value == null ? 0L : value;
+	}
+
+	private void bumpPvpStat(String key, long by)
+	{
+		if (pvpStat("pvpSince") == 0L)
+		{
+			configManager.setRSProfileConfiguration(AccountAuditConfig.GROUP, "pvpSince", System.currentTimeMillis());
+		}
+		configManager.setRSProfileConfiguration(AccountAuditConfig.GROUP, key, pvpStat(key) + by);
+		syncQueued = true;
+	}
+
+	@Subscribe
+	public void onPlayerLootReceived(PlayerLootReceived event)
+	{
+		if (!config.pvpTracking())
+		{
+			return;
+		}
+		long value = 0;
+		for (ItemStack stack : event.getItems())
+		{
+			if (isLootKey(stack.getId()))
+			{
+				continue; // keys are counted when they land in the inventory
+			}
+			value += (long) itemManager.getItemPrice(stack.getId()) * stack.getQuantity();
+		}
+		bumpPvpStat("pvpKills", 1);
+		if (value > 0)
+		{
+			bumpPvpStat("pvpLootGp", value);
+		}
+	}
+
+	@Subscribe
+	public void onInteractingChanged(InteractingChanged event)
+	{
+		if (event.getSource() instanceof Player && event.getSource() != client.getLocalPlayer()
+			&& event.getTarget() == client.getLocalPlayer())
+		{
+			lastPlayerAggroTick = client.getTickCount();
+		}
+	}
+
+	@Subscribe
+	public void onActorDeath(ActorDeath event)
+	{
+		if (!config.pvpTracking() || event.getActor() != client.getLocalPlayer())
+		{
+			return;
+		}
+		Actor opponent = client.getLocalPlayer().getInteracting();
+		boolean inPvpArea = client.getVarbitValue(Varbits.IN_WILDERNESS) == 1
+			|| client.getWorldType().contains(WorldType.PVP);
+		boolean playerInvolved = opponent instanceof Player
+			|| client.getTickCount() - lastPlayerAggroTick < 25;
+		if (inPvpArea && playerInvolved)
+		{
+			bumpPvpStat("pvpDeaths", 1);
+		}
+	}
+
+	private void trackLootKeys(ItemContainer inventory)
+	{
+		if (inventory == null)
+		{
+			return;
+		}
+		int count = 0;
+		for (Item item : inventory.getItems())
+		{
+			if (isLootKey(item.getId()))
+			{
+				count++;
+			}
+		}
+		if (lastLootKeyCount >= 0 && count > lastLootKeyCount && config.pvpTracking())
+		{
+			bumpPvpStat("pvpLootKeys", count - lastLootKeyCount);
+		}
+		lastLootKeyCount = count;
+	}
+
+	/** Null until the first tracked event, so untouched characters send nothing. */
+	private JsonObject collectPvp()
+	{
+		if (!config.pvpTracking())
+		{
+			return null;
+		}
+		long since = pvpStat("pvpSince");
+		if (since == 0L)
+		{
+			return null;
+		}
+		JsonObject pvp = new JsonObject();
+		pvp.addProperty("kills", pvpStat("pvpKills"));
+		pvp.addProperty("deaths", pvpStat("pvpDeaths"));
+		pvp.addProperty("lootKeys", pvpStat("pvpLootKeys"));
+		pvp.addProperty("lootValueGp", pvpStat("pvpLootGp"));
+		pvp.addProperty("since", Instant.ofEpochMilli(since).toString());
+		return pvp;
 	}
 
 	@Subscribe
 	public void onItemContainerChanged(ItemContainerChanged event)
 	{
+		if (event.getContainerId() == InventoryID.INVENTORY.getId())
+		{
+			trackLootKeys(event.getItemContainer());
+			return;
+		}
 		// Automatic bank-summary capture: opt-in toggle, fires while the bank is open.
 		if (!config.bankSync() || event.getContainerId() != InventoryID.BANK.getId())
 		{
@@ -527,6 +680,11 @@ public class AccountAuditPlugin extends Plugin
 		delta.add("equipment", equipment);
 		delta.add("diaries", collectDiaries());
 		delta.add("personalBests", collectPersonalBests());
+		JsonObject pvp = collectPvp();
+		if (pvp != null)
+		{
+			delta.add("pvp", pvp);
+		}
 		// Quest points varp (101) — stable id; gameval constant is VarPlayerID.QP on new APIs.
 		delta.addProperty("questPoints", client.getVarpValue(101));
 		if (client.getLocalPlayer() != null && client.getLocalPlayer().getName() != null)
