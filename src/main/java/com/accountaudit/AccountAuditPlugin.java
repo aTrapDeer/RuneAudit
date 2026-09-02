@@ -10,7 +10,9 @@ import java.security.NoSuchAlgorithmException;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.Locale;
+import java.util.HashSet;
 import java.util.Objects;
+import java.util.Set;
 import javax.inject.Inject;
 import lombok.extern.slf4j.Slf4j;
 import net.runelite.api.ChatMessageType;
@@ -26,6 +28,7 @@ import net.runelite.api.Varbits;
 import net.runelite.client.callback.ClientThread;
 import net.runelite.client.config.ConfigManager;
 import net.runelite.client.eventbus.Subscribe;
+import net.runelite.client.game.ItemManager;
 import net.runelite.client.events.ConfigChanged;
 import net.runelite.client.plugins.Plugin;
 import net.runelite.client.plugins.PluginDescriptor;
@@ -59,7 +62,9 @@ import com.google.inject.Provides;
  * Security & consent model (mirrors docs/plugin-spec.md in the main repo):
  * - Never touches credentials. Linking uses a short-lived code the player generates
  *   while signed into the website, pasted here — proof of control of both sides.
- * - Sends only what the consent toggle covers: quest states, quest points, levels.
+ * - Sends only what the consent toggles cover: quest states, quest points, levels,
+ *   worn gear, diaries, personal bests — and, separately opted in, a bank SUMMARY
+ *   (total value + which published items-of-interest are present), never the bank.
  * - The account is identified by a SHA-256 of RuneLite's account hash — the raw
  *   value never leaves the client.
  */
@@ -94,11 +99,20 @@ public class AccountAuditPlugin extends Plugin
 	@Inject
 	private ClientToolbar clientToolbar;
 
+	@Inject
+	private ItemManager itemManager;
+
 	/** Hash of the last payload we sent, to skip no-change syncs. */
 	private String lastSentDigest = null;
 	private boolean syncQueued = false;
-	/** Bank contents captured on the last bank-open, awaiting the next sync. Opt-in. */
-	private JsonArray pendingBank = null;
+	/**
+	 * Bank SUMMARY captured on the last bank-open, awaiting the next sync. Opt-in.
+	 * Holds total value, stack counts, and which items-of-interest are present —
+	 * never the inventory itself (see SCOPE.md).
+	 */
+	private JsonObject pendingBank = null;
+	/** Lower-cased names from GET /api/items-of-interest — the only ownership vocabulary. */
+	private volatile Set<String> interestNames = null;
 	private AccountAuditPanel panel;
 	private NavigationButton navButton;
 
@@ -133,6 +147,7 @@ public class AccountAuditPlugin extends Plugin
 			.panel(panel)
 			.build();
 		clientToolbar.addNavigation(navButton);
+		fetchItemsOfInterest();
 		fetchPlan();
 		log.info("RuneAudit started");
 	}
@@ -176,7 +191,7 @@ public class AccountAuditPlugin extends Plugin
 	@Subscribe
 	public void onItemContainerChanged(ItemContainerChanged event)
 	{
-		// Automatic bank capture: opt-in toggle, fires while the bank is open.
+		// Automatic bank-summary capture: opt-in toggle, fires while the bank is open.
 		if (!config.bankSync() || event.getContainerId() != InventoryID.BANK.getId())
 		{
 			return;
@@ -187,28 +202,117 @@ public class AccountAuditPlugin extends Plugin
 		}
 	}
 
-	/** Serialize a bank container into pendingBank. Returns false when unavailable. */
+	/**
+	 * Reduce a bank container to the summary we are willing to transmit:
+	 * total GE value (priced locally by RuneLite's ItemManager, coins/platinum at face
+	 * value), stack counts, and which published items-of-interest are present. Item
+	 * names and quantities never leave this method. Returns false when unavailable.
+	 */
 	private boolean captureBank(ItemContainer bankContainer)
 	{
 		if (bankContainer == null)
 		{
 			return false;
 		}
-		JsonArray items = new JsonArray();
+		Set<String> interest = interestNames;
+		if (interest == null)
+		{
+			// Without the published list we can't say what's owned — fetch and wait.
+			fetchItemsOfInterest();
+			return false;
+		}
+		long valueGp = 0;
+		int itemCount = 0;
+		int unpriced = 0;
+		Set<String> owned = new HashSet<>();
 		for (Item item : bankContainer.getItems())
 		{
 			if (item.getId() <= 0 || item.getQuantity() <= 0)
 			{
 				continue;
 			}
-			JsonObject entry = new JsonObject();
-			entry.addProperty("id", item.getId());
-			entry.addProperty("name", client.getItemDefinition(item.getId()).getName());
-			entry.addProperty("qty", item.getQuantity());
-			items.add(entry);
+			itemCount++;
+			int unit = itemManager.getItemPrice(item.getId());
+			if (unit > 0)
+			{
+				valueGp += (long) unit * item.getQuantity();
+			}
+			else
+			{
+				unpriced++;
+			}
+			String name = client.getItemDefinition(item.getId()).getName().toLowerCase(Locale.ROOT);
+			for (String tracked : interest)
+			{
+				// "toxic blowpipe (empty)" owns "toxic blowpipe"; "bow of faerdhinen (c)" owns
+				// "bow of faerdhinen". Only bank-name-contains-tracked-name, never the reverse,
+				// so a plain "Cape" can't claim a fire cape.
+				if (name.contains(stripVariant(tracked)))
+				{
+					owned.add(tracked);
+				}
+			}
 		}
-		pendingBank = items;
+		JsonObject summary = new JsonObject();
+		summary.addProperty("valueGp", valueGp);
+		summary.addProperty("itemCount", itemCount);
+		summary.addProperty("unpricedCount", unpriced);
+		JsonArray ownedArr = new JsonArray();
+		for (String tracked : owned)
+		{
+			ownedArr.add(tracked);
+		}
+		summary.add("owned", ownedArr);
+		pendingBank = summary;
 		return true;
+	}
+
+	private static String stripVariant(String trackedName)
+	{
+		return trackedName.replace(" (c)", "").replace(" (f)", "");
+	}
+
+	/**
+	 * The published vocabulary of ownership flags. Fetched once per session; anyone can
+	 * open the URL to see exactly which item names the plugin may ever report.
+	 */
+	private void fetchItemsOfInterest()
+	{
+		Request request = new Request.Builder()
+			.url(config.apiBase() + "/api/items-of-interest")
+			.get()
+			.build();
+		okHttpClient.newCall(request).enqueue(new Callback()
+		{
+			@Override
+			public void onFailure(Call call, IOException e)
+			{
+				log.debug("RuneAudit: items-of-interest fetch failed", e);
+			}
+
+			@Override
+			public void onResponse(Call call, Response response) throws IOException
+			{
+				try (Response r = response)
+				{
+					if (!r.isSuccessful() || r.body() == null)
+					{
+						return;
+					}
+					JsonObject json = gson.fromJson(r.body().string(), JsonObject.class);
+					if (!json.has("names"))
+					{
+						return;
+					}
+					Set<String> names = new HashSet<>();
+					for (JsonElement el : json.getAsJsonArray("names"))
+					{
+						names.add(el.getAsString().toLowerCase(Locale.ROOT));
+					}
+					interestNames = names;
+				}
+			}
+		});
 	}
 
 	/**
@@ -231,10 +335,13 @@ public class AccountAuditPlugin extends Plugin
 		}
 		if (!captureBank(bank))
 		{
-			panel.showStatus("Couldn't read the bank — open it and try again.");
+			panel.showStatus(interestNames == null
+				? "Fetching the tracked-item list from the server — try again in a moment."
+				: "Couldn't read the bank — open it and try again.");
 			return;
 		}
-		panel.showStatus("Sending bank (" + bank.getItems().length + " slots, encrypted)…");
+		panel.showStatus("Sending bank summary (value + " + pendingBank.getAsJsonArray("owned").size()
+			+ " tracked items, no inventory)…");
 		collectAndSend(true);
 	}
 
@@ -427,16 +534,16 @@ public class AccountAuditPlugin extends Plugin
 			delta.addProperty("displayName", client.getLocalPlayer().getName());
 		}
 
-		// Digest covers progress only; a pending bank capture always forces a send.
+		// Digest covers progress only; a pending bank summary always forces a send.
 		String digest = sha256Hex(delta.toString());
-		final JsonArray bankToSend = pendingBank;
+		final JsonObject bankToSend = pendingBank;
 		if (!force && digest.equals(lastSentDigest) && bankToSend == null)
 		{
 			return; // nothing changed since last sync
 		}
 		if (bankToSend != null)
 		{
-			delta.add("bank", bankToSend);
+			delta.add("bankSummary", bankToSend);
 		}
 
 		JsonObject payload = new JsonObject();

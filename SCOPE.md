@@ -22,7 +22,7 @@ shows the player's current quest-route progress and one suggestion.
 | Achievement diary tier completion (48 tiers) | diary varbits | same |
 | Personal best kill times | RuneLite's own `personalbest` config (written by the built-in Chat Commands plugin) | same |
 | Account identity | `Client.getAccountHash()` — **only ever transmitted as a SHA-256 hash** | during link + sync |
-| Bank contents (item id/name/qty) | bank container | **only while the bank interface is open, and only when the separate opt-in toggle is enabled** |
+| Bank **summary** — total GE value, stack count, and which names from the public [items-of-interest list](https://osrs-accountaudit.vercel.app/api/items-of-interest) are present | bank container, reduced locally; item names/quantities never leave the client | **only on the panel's Sync bank button, or while the bank is open if the separate opt-in toggle is enabled** |
 
 Everything above is information the vanilla client already shows the player. The plugin
 performs **no gameplay actions**: no clicks, no input automation, no menu interaction,
@@ -35,16 +35,19 @@ no combat assistance, no information about other players.
 - Transport: HTTPS, authenticated by a per-link token issued during the link flow.
   Tokens are revocable from the website; unlinking deletes synced data server-side.
 - Payload: exactly the table above, as JSON deltas; unchanged data is not resent.
-- Bank data is transmitted **only** when the "Sync bank contents" toggle (default OFF)
-  is enabled, and is stored encrypted at rest server-side.
+- The bank summary is transmitted **only** on an explicit Sync bank press, or when the
+  "Auto-sync bank summary" toggle (default OFF) is enabled. The plugin never transmits the
+  bank inventory: it prices the bank locally with RuneLite's ItemManager and checks it
+  against the published items-of-interest list, then sends one number, two counts, and
+  the matching names. Stored encrypted at rest server-side.
 
 ## Consent model
 
 - Nothing is transmitted until the player completes the link flow: they generate a
   code on the website while signed in there, and paste it into plugin settings while
   logged into the character — proving control of both sides.
-- Two independent consent toggles: progress data (on after linking) and bank
-  (off by default, separate opt-in).
+- Two independent consent toggles: progress data (on after linking) and the bank
+  summary (off by default, separate opt-in; the panel button is a one-shot consent).
 - Turning the plugin off, clearing the token, or unlinking on the website stops all
   transmission immediately.
 

@@ -1,13 +1,24 @@
 # RuneAudit — RuneLite plugin
 
-Syncs your own quest completion, quest points, and skill levels to your RuneAudit
-profile, using the link-code ownership flow described in
-[../docs/plugin-spec.md](../docs/plugin-spec.md).
+Syncs your own quest completion, quest points, skill levels, worn gear, diary tiers,
+and personal bests to your RuneAudit profile, using a link-code ownership flow (no
+credentials, ever). Exactly what is read and sent is listed in [SCOPE.md](SCOPE.md).
+
+**Bank:** off by default. When you press *Sync bank* (or enable auto-sync), the plugin
+sends a *summary* only — total GE value, stack count, and which items from the public
+[items-of-interest list](https://osrs-accountaudit.vercel.app/api/items-of-interest)
+you have — so the site can suggest gear upgrades and sells. Your bank contents never
+leave your client.
+
+**Cost:** the plugin and every account feature on the site are free. The site's optional
+AI chat is paid or bring-your-own-OpenAI-key; nothing in this plugin depends on it.
 
 ## What it does / doesn't do
 
 - **Reads only your own data**, and only data the vanilla client already shows you:
-  quest states (`Quest.getState`), quest points (varp 101), real skill levels.
+  quest states (`Quest.getState`), quest points (varp 101), real skill levels, worn
+  equipment, diary varbits, RuneLite's own personal-best store, and — opt-in — a bank
+  summary computed locally (see above).
 - **Sends nothing without consent**: syncing requires you to explicitly link via a code,
   and the "Sync progress data" toggle gates every send.
 - **Never touches credentials.** You log in through RuneLite's own login flow; the

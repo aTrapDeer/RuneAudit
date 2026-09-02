@@ -70,7 +70,7 @@ public class AccountAuditPanel extends PluginPanel
 		content.add(syncButton);
 		content.add(Box.createVerticalStrut(4));
 
-		bankButton.setToolTipText("Sends your bank contents to YOUR private profile (encrypted) so the site can value it and suggest gear upgrades. Open your bank once this session first.");
+		bankButton.setToolTipText("Sends a bank SUMMARY to your private profile: total value and which tracked gear items you have. Never the bank itself. Open your bank once this session first.");
 		bankButton.addActionListener(e -> onSyncBank.run());
 		content.add(bankButton);
 		content.add(Box.createVerticalStrut(4));

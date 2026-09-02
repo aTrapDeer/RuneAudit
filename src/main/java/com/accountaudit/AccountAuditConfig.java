@@ -65,8 +65,8 @@ public interface AccountAuditConfig extends Config
 
 	@ConfigItem(
 		keyName = "bankSync",
-		name = "Sync bank contents (opt-in)",
-		description = "OFF by default. When enabled, your bank is captured whenever you open it and stored ENCRYPTED on the server, visible only to you. Powers bank value and gear-aware recommendations.",
+		name = "Auto-sync bank summary (opt-in)",
+		description = "OFF by default. When enabled, each time you open your bank the plugin sends a SUMMARY: total GE value, stack count, and which items from the public tracked-item list you have. The item list itself never leaves your client. Stored encrypted, visible only to you. The Sync bank button in the panel does the same on demand.",
 		position = 4,
 		section = consentSection
 	)
