@@ -22,6 +22,7 @@ shows the player's current quest-route progress and one suggestion.
 | Achievement diary tier completion (48 tiers) | diary varbits | same |
 | Personal best kill times | RuneLite's own `personalbest` config (written by the built-in Chat Commands plugin) | same |
 | PvP record — player kills (from loot you receive), deaths where a player was involved, Wilderness loot keys picked up, GE value of PvP loot | RuneLite loot/death/inventory events, counted client-side **since install** (approximate; the game has no lifetime PK counter) | with progress data, while the "Track PvP record" toggle is on (default on) |
+| Pets — the follower NPC's name when the pet-drop chat message fires | chat message + `Client.getFollower()`, cumulative since install | with progress data |
 | Account identity | `Client.getAccountHash()` — **only ever transmitted as a SHA-256 hash** | during link + sync |
 | Bank **summary** — total GE value, stack count, and which names from the public [items-of-interest list](https://osrs-accountaudit.vercel.app/api/items-of-interest) are present | bank container, reduced locally; item names/quantities never leave the client | **only on the panel's Sync bank button, or while the bank is open if the separate opt-in toggle is enabled** |
 

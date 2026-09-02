@@ -28,7 +28,12 @@ import net.runelite.api.Actor;
 import net.runelite.api.Player;
 import net.runelite.api.Varbits;
 import net.runelite.api.WorldType;
+import net.runelite.api.NPC;
 import net.runelite.api.events.ActorDeath;
+import net.runelite.api.events.ChatMessage;
+import net.runelite.api.events.GameTick;
+import java.util.Arrays;
+import java.util.LinkedHashSet;
 import net.runelite.api.events.InteractingChanged;
 import net.runelite.api.gameval.ItemID;
 import net.runelite.client.events.PlayerLootReceived;
@@ -118,6 +123,8 @@ public class AccountAuditPlugin extends Plugin
 	private int lastLootKeyCount = -1;
 	/** Last game tick a player targeted us — used to attribute an ambiguous death. */
 	private int lastPlayerAggroTick = -1000;
+	/** Tick at which to look for a new follower after a pet-drop message; -1 = idle. */
+	private int petCheckTick = -1;
 	/**
 	 * Bank SUMMARY captured on the last bank-open, awaiting the next sync. Opt-in.
 	 * Holds total value, stack counts, and which items-of-interest are present —
@@ -200,6 +207,76 @@ public class AccountAuditPlugin extends Plugin
 			syncQueued = true;
 			lastLootKeyCount = -1;
 		}
+	}
+
+	// ---------- Pets: recorded when the drop message fires and a follower appears ----------
+
+	@Subscribe
+	public void onChatMessage(ChatMessage event)
+	{
+		if (event.getType() != ChatMessageType.GAMEMESSAGE)
+		{
+			return;
+		}
+		String text = event.getMessage();
+		if (text.contains("funny feeling like you're being followed")
+			|| text.contains("funny feeling like you would have been followed")
+			|| text.contains("sneaking into your backpack"))
+		{
+			petCheckTick = client.getTickCount() + 3;
+		}
+	}
+
+	@Subscribe
+	public void onGameTick(GameTick event)
+	{
+		if (petCheckTick < 0 || client.getTickCount() < petCheckTick)
+		{
+			return;
+		}
+		petCheckTick = -1;
+		NPC follower = client.getFollower();
+		if (follower != null && follower.getName() != null)
+		{
+			recordPet(follower.getName());
+		}
+	}
+
+	private Set<String> knownPets()
+	{
+		String stored = configManager.getRSProfileConfiguration(AccountAuditConfig.GROUP, "pets");
+		Set<String> pets = new LinkedHashSet<>();
+		if (stored != null && !stored.isEmpty())
+		{
+			pets.addAll(Arrays.asList(stored.split("\\|")));
+		}
+		return pets;
+	}
+
+	private void recordPet(String name)
+	{
+		Set<String> pets = knownPets();
+		if (pets.add(name))
+		{
+			configManager.setRSProfileConfiguration(AccountAuditConfig.GROUP, "pets", String.join("|", pets));
+			syncQueued = true;
+			messageLater("RuneAudit: pet recorded — " + name);
+		}
+	}
+
+	private JsonArray collectPets()
+	{
+		Set<String> pets = knownPets();
+		if (pets.isEmpty())
+		{
+			return null;
+		}
+		JsonArray arr = new JsonArray();
+		for (String pet : pets)
+		{
+			arr.add(pet);
+		}
+		return arr;
 	}
 
 	// ---------- PvP record: approximate, counted client-side since install ----------
@@ -684,6 +761,11 @@ public class AccountAuditPlugin extends Plugin
 		if (pvp != null)
 		{
 			delta.add("pvp", pvp);
+		}
+		JsonArray pets = collectPets();
+		if (pets != null)
+		{
+			delta.add("pets", pets);
 		}
 		// Quest points varp (101) — stable id; gameval constant is VarPlayerID.QP on new APIs.
 		delta.addProperty("questPoints", client.getVarpValue(101));
