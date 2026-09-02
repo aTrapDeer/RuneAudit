@@ -1,4 +1,4 @@
-# Account Audit Plugin — Scope & Data Access
+# RuneAudit Plugin — Scope & Data Access
 
 This document states exactly what the plugin does, what it reads from the client, what
 it transmits, and what it will never do. It exists for Plugin Hub reviewers and for
@@ -6,7 +6,7 @@ users deciding whether to install.
 
 ## What the plugin is
 
-A companion to the Account Audit website. It lets a player link their character to
+A companion to the RuneAudit website. It lets a player link their character to
 their own web account (proving ownership without credentials) and syncs their progress
 so the site can build personalised plans, roadmaps, and recommendations. A side panel
 shows the player's current quest-route progress and one suggestion.
@@ -30,7 +30,7 @@ no combat assistance, no information about other players.
 
 ## What it transmits, and where
 
-- Destination: the Account Audit API (the URL is visible and editable in plugin
+- Destination: the RuneAudit API (the URL is visible and editable in plugin
   settings — nothing is hidden).
 - Transport: HTTPS, authenticated by a per-link token issued during the link flow.
   Tokens are revocable from the website; unlinking deletes synced data server-side.

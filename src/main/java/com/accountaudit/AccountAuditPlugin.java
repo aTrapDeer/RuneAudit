@@ -53,8 +53,8 @@ import okhttp3.Response;
 import com.google.inject.Provides;
 
 /**
- * Account Audit — syncs quest completion, quest points, and skill levels to the
- * player's own Account Audit profile.
+ * RuneAudit — syncs quest completion, quest points, and skill levels to the
+ * player's own RuneAudit profile.
  *
  * Security & consent model (mirrors docs/plugin-spec.md in the main repo):
  * - Never touches credentials. Linking uses a short-lived code the player generates
@@ -65,8 +65,8 @@ import com.google.inject.Provides;
  */
 @Slf4j
 @PluginDescriptor(
-	name = "Account Audit",
-	description = "Sync your progress to Account Audit and see what's worth doing next",
+	name = "RuneAudit",
+	description = "Sync your progress to RuneAudit and see what's worth doing next",
 	tags = {"quests", "progress", "plans", "sync"}
 )
 public class AccountAuditPlugin extends Plugin
@@ -127,14 +127,14 @@ public class AccountAuditPlugin extends Plugin
 			}),
 			() -> clientThread.invokeLater(this::syncBankNow));
 		navButton = NavigationButton.builder()
-			.tooltip("Account Audit")
+			.tooltip("RuneAudit")
 			.icon(drawIcon())
 			.priority(7)
 			.panel(panel)
 			.build();
 		clientToolbar.addNavigation(navButton);
 		fetchPlan();
-		log.info("Account Audit started");
+		log.info("RuneAudit started");
 	}
 
 	@Override
@@ -290,7 +290,7 @@ public class AccountAuditPlugin extends Plugin
 		if (client.getGameState() != GameState.LOGGED_IN || client.getLocalPlayer() == null)
 		{
 			panel.showStatus("Log into the character you want to link, then press Link again.");
-			message("Account Audit: log into the character you want to link, then try again.");
+			message("RuneAudit: log into the character you want to link, then try again.");
 			return;
 		}
 		final long accountHash = client.getAccountHash();
@@ -317,9 +317,9 @@ public class AccountAuditPlugin extends Plugin
 			@Override
 			public void onFailure(Call call, IOException e)
 			{
-				log.warn("Account Audit link failed", e);
+				log.warn("RuneAudit link failed", e);
 				panel.showStatus("Couldn't reach the server (" + e.getMessage() + "). Check your connection and press Link again.");
-				messageLater("Account Audit: couldn't reach the server (" + e.getMessage() + ").");
+				messageLater("RuneAudit: couldn't reach the server (" + e.getMessage() + ").");
 			}
 
 			@Override
@@ -330,10 +330,10 @@ public class AccountAuditPlugin extends Plugin
 					String responseBody = r.body() != null ? r.body().string() : "";
 					if (!r.isSuccessful())
 					{
-						log.warn("Account Audit link rejected: {} {}", r.code(), responseBody);
+						log.warn("RuneAudit link rejected: {} {}", r.code(), responseBody);
 						String reason = friendlyError(responseBody, r.code());
 						panel.showStatus("Link failed: " + reason);
-						messageLater("Account Audit: link failed (" + reason + ")");
+						messageLater("RuneAudit: link failed (" + reason + ")");
 						return;
 					}
 					JsonObject json = gson.fromJson(responseBody, JsonObject.class);
@@ -342,7 +342,7 @@ public class AccountAuditPlugin extends Plugin
 					configManager.setConfiguration(AccountAuditConfig.GROUP, AccountAuditConfig.LINK_CODE_KEY, "");
 					panel.setLinked(true);
 					panel.showStatus("Linked as " + displayName + " ✓ — syncing…");
-					messageLater("Account Audit: " + displayName + " linked successfully. Syncing…");
+					messageLater("RuneAudit: " + displayName + " linked successfully. Syncing…");
 					clientThread.invokeLater(() -> collectAndSend(true));
 				}
 			}
@@ -456,7 +456,7 @@ public class AccountAuditPlugin extends Plugin
 			public void onFailure(Call call, IOException e)
 			{
 				panel.showStatus("Sync failed: couldn't reach the server. Will retry automatically.");
-				log.warn("Account Audit sync failed", e);
+				log.warn("RuneAudit sync failed", e);
 			}
 
 			@Override
@@ -473,15 +473,15 @@ public class AccountAuditPlugin extends Plugin
 						}
 						panel.showStatus("Synced ✓ — loading your plan…");
 						fetchPlan();
-						log.debug("Account Audit: synced");
+						log.debug("RuneAudit: synced");
 					}
 					else if (r.code() == 401)
 					{
-						log.warn("Account Audit: token revoked; clearing. Re-link from the website.");
+						log.warn("RuneAudit: token revoked; clearing. Re-link from the website.");
 						configManager.setConfiguration(AccountAuditConfig.GROUP, AccountAuditConfig.PLUGIN_TOKEN_KEY, "");
 						panel.setLinked(false);
 						panel.showStatus("This link was revoked on the website — generate a new code and re-link.");
-						messageLater("Account Audit: this link was revoked — generate a new code on the website to re-link.");
+						messageLater("RuneAudit: this link was revoked — generate a new code on the website to re-link.");
 					}
 					else if (r.code() == 429)
 					{
@@ -493,7 +493,7 @@ public class AccountAuditPlugin extends Plugin
 					else
 					{
 						panel.showStatus("Sync failed (HTTP " + r.code() + ") — will retry automatically.");
-						log.warn("Account Audit sync rejected: {}", r.code());
+						log.warn("RuneAudit sync rejected: {}", r.code());
 					}
 				}
 			}
@@ -592,7 +592,7 @@ public class AccountAuditPlugin extends Plugin
 			@Override
 			public void onFailure(Call call, IOException e)
 			{
-				panel.showStatus("Couldn't reach the Account Audit server.");
+				panel.showStatus("Couldn't reach the RuneAudit server.");
 			}
 
 			@Override

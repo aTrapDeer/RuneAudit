@@ -37,7 +37,7 @@ public class AccountAuditPanel extends PluginPanel
 		JPanel content = new JPanel();
 		content.setLayout(new BoxLayout(content, BoxLayout.Y_AXIS));
 
-		JLabel title = new JLabel("Account Audit");
+		JLabel title = new JLabel("RuneAudit");
 		title.setFont(title.getFont().deriveFont(Font.BOLD, 16f));
 		content.add(title);
 		content.add(Box.createVerticalStrut(6));

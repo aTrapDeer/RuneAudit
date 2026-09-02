@@ -14,7 +14,7 @@ public interface AccountAuditConfig extends Config
 
 	@ConfigSection(
 		name = "Linking",
-		description = "Connect this character to your Account Audit profile",
+		description = "Connect this character to your RuneAudit profile",
 		position = 0
 	)
 	String linkingSection = "linking";
@@ -22,7 +22,7 @@ public interface AccountAuditConfig extends Config
 	@ConfigItem(
 		keyName = LINK_CODE_KEY,
 		name = "Link code",
-		description = "Paste the code from the Account Audit website (My accounts page) while logged into the character you want to link. It is consumed on use.",
+		description = "Paste the code from the RuneAudit website (My accounts page) while logged into the character you want to link. It is consumed on use.",
 		position = 1,
 		section = linkingSection
 	)
@@ -54,7 +54,7 @@ public interface AccountAuditConfig extends Config
 	@ConfigItem(
 		keyName = "syncProgress",
 		name = "Sync progress data",
-		description = "Sends quest completion, quest points, skill levels, and worn equipment to your private Account Audit profile. No chat, no location.",
+		description = "Sends quest completion, quest points, skill levels, and worn equipment to your private RuneAudit profile. No chat, no location.",
 		position = 3,
 		section = consentSection
 	)

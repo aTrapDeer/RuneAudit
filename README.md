@@ -1,6 +1,6 @@
-# Account Audit — RuneLite plugin
+# RuneAudit — RuneLite plugin
 
-Syncs your own quest completion, quest points, and skill levels to your Account Audit
+Syncs your own quest completion, quest points, and skill levels to your RuneAudit
 profile, using the link-code ownership flow described in
 [../docs/plugin-spec.md](../docs/plugin-spec.md).
 
@@ -49,7 +49,7 @@ Then:
 2. Sign in at http://localhost:3000/accounts (Dev login or Google) and click
    **Generate link code**.
 3. In the dev RuneLite client, log into the character you want to link, open the
-   Account Audit plugin settings, and paste the code into **Link code**.
+   RuneAudit plugin settings, and paste the code into **Link code**.
    (Advanced → API base URL already defaults to `http://localhost:3000`.)
 4. You'll get an in-game chat confirmation; within ~30 seconds the first sync lands and
    the website's **My accounts** page shows the character as synced.
