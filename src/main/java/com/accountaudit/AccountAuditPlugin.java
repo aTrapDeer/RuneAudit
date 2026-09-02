@@ -788,7 +788,7 @@ public class AccountAuditPlugin extends Plugin
 	{
 		try
 		{
-			JsonObject json = new Gson().fromJson(body, JsonObject.class);
+			JsonObject json = gson.fromJson(body, JsonObject.class);
 			if (json != null && json.has("message"))
 			{
 				return json.get("message").getAsString();
