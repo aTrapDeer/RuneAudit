@@ -784,7 +784,7 @@ public class AccountAuditPlugin extends Plugin
 		}
 	}
 
-	private static String friendlyError(String body, int code)
+	private String friendlyError(String body, int code)
 	{
 		try
 		{
