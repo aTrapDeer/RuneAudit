@@ -201,6 +201,7 @@ public class AccountAuditPlugin extends Plugin
 				collectAndSend(true);
 			}),
 			() -> clientThread.invokeLater(this::syncBankNow));
+		panel.setOnRefreshRating(() -> refreshRating());
 		navButton = NavigationButton.builder()
 			.tooltip("RuneAudit")
 			.icon(loadIcon())
@@ -242,6 +243,30 @@ public class AccountAuditPlugin extends Plugin
 			migrateGlobalToken();
 			fetchPlan();
 		}
+	}
+
+	// ---------- Rating: deterministic, refreshed at most once a day on request ----------
+
+	private static final long RATING_REFRESH_MS = 24L * 60 * 60 * 1000;
+
+	private void refreshRating()
+	{
+		if (client.getGameState() != GameState.LOGGED_IN)
+		{
+			panel.showStatus("Log into the character first.");
+			return;
+		}
+		Long last = configManager.getRSProfileConfiguration(AccountAuditConfig.GROUP, "ratingRefreshedAt", long.class);
+		long now = System.currentTimeMillis();
+		if (last != null && now - last < RATING_REFRESH_MS)
+		{
+			long hours = Math.max(1, (RATING_REFRESH_MS - (now - last)) / 3_600_000);
+			panel.showStatus("Rating refreshes once a day — try again in about " + hours + "h. (It also updates after each sync.)");
+			return;
+		}
+		configManager.setRSProfileConfiguration(AccountAuditConfig.GROUP, "ratingRefreshedAt", now);
+		panel.showStatus("Refreshing rating…");
+		fetchPlan();
 	}
 
 	// ---------- Pets: recorded when the drop message fires and a follower appears ----------
@@ -1064,6 +1089,17 @@ public class AccountAuditPlugin extends Plugin
 					}
 					String profileUrl = json.has("profileUrl") && !json.get("profileUrl").isJsonNull() ? json.get("profileUrl").getAsString() : null;
 					panel.showPlan(planLine, steps, picks, profileUrl);
+					if (json.has("rating") && json.get("rating").isJsonObject())
+					{
+						JsonObject rt = json.getAsJsonObject("rating");
+						panel.showRating(
+							rt.get("letter").getAsString(),
+							rt.get("score").getAsInt(),
+							rt.get("tier").getAsString(),
+							rt.get("stage").getAsString(),
+							rt.get("complete").getAsBoolean(),
+							rt.has("note") && !rt.get("note").isJsonNull() ? rt.get("note").getAsString() : null);
+					}
 				}
 			}
 		});

@@ -27,6 +27,10 @@ public class AccountAuditPanel extends PluginPanel
 	private final JButton bankButton = new JButton("Sync bank");
 	private final JPanel linkRow = new JPanel();
 	private final JPanel stepsPanel = new JPanel();
+	private final JLabel ratingLine = new JLabel();
+	private final JLabel ratingNote = new JLabel();
+	private final JButton ratingButton = new JButton("Refresh rating");
+	private Runnable onRefreshRating = () -> {};
 	private final JLabel suggestionTitle = new JLabel();
 	private final JPanel picksPanel = new JPanel();
 	private final JButton openButton = new JButton("Open on RuneAudit");
@@ -45,6 +49,17 @@ public class AccountAuditPanel extends PluginPanel
 		content.add(title);
 		content.add(Box.createVerticalStrut(6));
 		content.add(status);
+		content.add(Box.createVerticalStrut(8));
+
+		// Rating badge: computed on the site from synced data (no AI, no credits);
+		// updates after each sync, and on demand at most once a day.
+		ratingLine.setFont(ratingLine.getFont().deriveFont(Font.BOLD, 13f));
+		content.add(ratingLine);
+		content.add(ratingNote);
+		ratingButton.setToolTipText("Recompute your account rating from the latest synced data. Once a day; it also updates automatically after each sync.");
+		ratingButton.addActionListener(e -> onRefreshRating.run());
+		ratingButton.setVisible(false);
+		content.add(ratingButton);
 		content.add(Box.createVerticalStrut(8));
 
 		// Link row: paste the website code, press Link, watch the status line.
@@ -99,6 +114,24 @@ public class AccountAuditPanel extends PluginPanel
 		showStatus("Checking link…");
 	}
 
+	void setOnRefreshRating(Runnable r)
+	{
+		onRefreshRating = r;
+	}
+
+	/** Tier badge line, e.g. "Rating: B 68 · Rune Planner (late)" plus the top note. */
+	void showRating(String letter, int score, String tier, String stage, boolean complete, String note)
+	{
+		SwingUtilities.invokeLater(() ->
+		{
+			ratingLine.setText(asHtml("Rating: " + letter + " " + score + " · " + tier + " (" + stage + ")" + (complete ? "" : " · provisional")));
+			ratingNote.setText(note == null ? "" : asHtml(note));
+			ratingButton.setVisible(true);
+			revalidate();
+			repaint();
+		});
+	}
+
 	void showStatus(String text)
 	{
 		SwingUtilities.invokeLater(() -> status.setText(asHtml(text)));
@@ -112,6 +145,12 @@ public class AccountAuditPanel extends PluginPanel
 			linkRow.setVisible(!linked);
 			syncButton.setVisible(linked);
 			bankButton.setVisible(linked);
+			if (!linked)
+			{
+				ratingLine.setText("");
+				ratingNote.setText("");
+				ratingButton.setVisible(false);
+			}
 			if (linked)
 			{
 				codeField.setText("");
