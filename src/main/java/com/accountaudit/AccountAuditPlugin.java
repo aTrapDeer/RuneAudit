@@ -261,11 +261,11 @@ public class AccountAuditPlugin extends Plugin
 		if (last != null && now - last < RATING_REFRESH_MS)
 		{
 			long hours = Math.max(1, (RATING_REFRESH_MS - (now - last)) / 3_600_000);
-			panel.showStatus("Rating refreshes once a day — try again in about " + hours + "h. (It also updates after each sync.)");
+			panel.showStatus("Audits refresh once a day — try again in about " + hours + "h. (It also updates after each sync and every night.)");
 			return;
 		}
 		configManager.setRSProfileConfiguration(AccountAuditConfig.GROUP, "ratingRefreshedAt", now);
-		panel.showStatus("Refreshing rating…");
+		panel.showStatus("Re-auditing…");
 		fetchPlan();
 	}
 

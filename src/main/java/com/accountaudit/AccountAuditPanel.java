@@ -29,7 +29,7 @@ public class AccountAuditPanel extends PluginPanel
 	private final JPanel stepsPanel = new JPanel();
 	private final JLabel ratingLine = new JLabel();
 	private final JLabel ratingNote = new JLabel();
-	private final JButton ratingButton = new JButton("Refresh rating");
+	private final JButton ratingButton = new JButton("Re-audit (once a day)");
 	private Runnable onRefreshRating = () -> {};
 	private final JLabel suggestionTitle = new JLabel();
 	private final JPanel picksPanel = new JPanel();
@@ -56,7 +56,7 @@ public class AccountAuditPanel extends PluginPanel
 		ratingLine.setFont(ratingLine.getFont().deriveFont(Font.BOLD, 13f));
 		content.add(ratingLine);
 		content.add(ratingNote);
-		ratingButton.setToolTipText("Recompute your account rating from the latest synced data. Once a day; it also updates automatically after each sync.");
+		ratingButton.setToolTipText("Recompute your account audit from the latest synced data. Once a day; it also updates automatically after each sync and every night.");
 		ratingButton.addActionListener(e -> onRefreshRating.run());
 		ratingButton.setVisible(false);
 		content.add(ratingButton);
@@ -124,7 +124,7 @@ public class AccountAuditPanel extends PluginPanel
 	{
 		SwingUtilities.invokeLater(() ->
 		{
-			ratingLine.setText(asHtml("Rating: " + letter + " " + score + " · " + tier + " (" + stage + ")" + (complete ? "" : " · provisional")));
+			ratingLine.setText(asHtml("Audit: " + letter + " " + score + " · " + tier + " (" + stage + ")" + (complete ? "" : " · provisional")));
 			ratingNote.setText(note == null ? "" : asHtml(note));
 			ratingButton.setVisible(true);
 			revalidate();
