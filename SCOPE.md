@@ -32,8 +32,10 @@ no combat assistance, no information about other players.
 
 ## What it transmits, and where
 
-- Destination: the RuneAudit API (the URL is visible and editable in plugin
-  settings — nothing is hidden).
+- Destination: the RuneAudit API over HTTPS (the URL is visible and editable in plugin
+  settings — nothing is hidden; non-HTTPS destinations are refused except localhost).
+- The link token is stored per character (RuneLite profile), so a second character on
+  the same client can never sync under another character's link.
 - Transport: HTTPS, authenticated by a per-link token issued during the link flow.
   Tokens are revocable from the website; unlinking deletes synced data server-side.
 - Payload: exactly the table above, as JSON deltas; unchanged data is not resent.

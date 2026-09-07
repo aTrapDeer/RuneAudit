@@ -12,6 +12,7 @@ import javax.swing.JPanel;
 import javax.swing.JTextField;
 import javax.swing.SwingUtilities;
 import net.runelite.client.ui.PluginPanel;
+import net.runelite.client.util.LinkBrowser;
 
 /**
  * The in-client panel: link with an explicit button, sync with an explicit button,
@@ -27,7 +28,9 @@ public class AccountAuditPanel extends PluginPanel
 	private final JPanel linkRow = new JPanel();
 	private final JPanel stepsPanel = new JPanel();
 	private final JLabel suggestionTitle = new JLabel();
-	private final JLabel suggestion = new JLabel();
+	private final JPanel picksPanel = new JPanel();
+	private final JButton openButton = new JButton("Open on RuneAudit");
+	private String profileUrl = null;
 
 	AccountAuditPanel(Runnable onRefresh, Consumer<String> onLink, Runnable onSyncNow, Runnable onSyncBank)
 	{
@@ -63,8 +66,21 @@ public class AccountAuditPanel extends PluginPanel
 
 		suggestionTitle.setFont(suggestionTitle.getFont().deriveFont(Font.BOLD));
 		content.add(suggestionTitle);
-		content.add(suggestion);
+		picksPanel.setLayout(new BoxLayout(picksPanel, BoxLayout.Y_AXIS));
+		content.add(picksPanel);
 		content.add(Box.createVerticalStrut(10));
+
+		openButton.setToolTipText("Open this character's RuneAudit page in your browser");
+		openButton.addActionListener(e ->
+		{
+			if (profileUrl != null)
+			{
+				LinkBrowser.browse(profileUrl);
+			}
+		});
+		openButton.setVisible(false);
+		content.add(openButton);
+		content.add(Box.createVerticalStrut(4));
 
 		syncButton.addActionListener(e -> onSyncNow.run());
 		content.add(syncButton);
@@ -110,7 +126,8 @@ public class AccountAuditPanel extends PluginPanel
 		SwingUtilities.invokeLater(() -> codeField.setText(""));
 	}
 
-	void showPlan(String planLine, java.util.List<String> steps, String suggestionName, String suggestionWhy)
+	/** picks: [name, why] pairs — the site's two solver picks with their "tailored because" line. */
+	void showPlan(String planLine, java.util.List<String> steps, java.util.List<String[]> picks, String url)
 	{
 		SwingUtilities.invokeLater(() ->
 		{
@@ -120,24 +137,26 @@ public class AccountAuditPanel extends PluginPanel
 			{
 				stepsPanel.add(new JLabel(asHtml("• " + step)));
 			}
-			if (suggestionName != null)
+			picksPanel.removeAll();
+			suggestionTitle.setText(picks.isEmpty() ? "" : (picks.size() > 1 ? "Two things worth doing:" : "Worth a look:"));
+			for (String[] pick : picks)
 			{
-				suggestionTitle.setText("Worth a look:");
-				suggestion.setText(asHtml(suggestionName + " — " + suggestionWhy));
+				JLabel name = new JLabel(asHtml(pick[0]));
+				name.setFont(name.getFont().deriveFont(Font.BOLD));
+				picksPanel.add(name);
+				picksPanel.add(new JLabel(asHtml(pick[1])));
+				picksPanel.add(Box.createVerticalStrut(6));
 			}
-			else
-			{
-				suggestionTitle.setText("");
-				suggestion.setText("");
-			}
-			stepsPanel.revalidate();
-			stepsPanel.repaint();
+			profileUrl = url;
+			openButton.setVisible(url != null);
+			revalidate();
+			repaint();
 		});
 	}
 
 	private static String asHtml(String text)
 	{
-		return "<html><body style='width: 180px'>" + text
+		return "<html><body style='width: 165px'>" + text
 			.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;") + "</body></html>";
 	}
 }

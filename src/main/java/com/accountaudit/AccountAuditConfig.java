@@ -34,9 +34,10 @@ public interface AccountAuditConfig extends Config
 	@ConfigItem(
 		keyName = PLUGIN_TOKEN_KEY,
 		name = "Plugin token",
-		description = "Issued automatically when a link code is claimed. Clear it to stop syncing; unlink on the website to revoke it entirely.",
+		description = "Legacy slot — link tokens are now stored per character automatically. Unlink on the website to revoke a link.",
 		position = 2,
 		secret = true,
+		hidden = true,
 		section = linkingSection
 	)
 	default String pluginToken()
@@ -98,12 +99,12 @@ public interface AccountAuditConfig extends Config
 	@ConfigItem(
 		keyName = "apiBase",
 		name = "API base URL",
-		description = "Where to sync to. Leave default unless you run your own instance (dev: http://localhost:3000).",
+		description = "Where to sync to (HTTPS only; http://localhost is allowed for development). Leave default unless you run your own instance.",
 		position = 4,
 		section = advancedSection
 	)
 	default String apiBase()
 	{
-		return "https://osrs-accountaudit.vercel.app";
+		return "https://www.runeaudit.com";
 	}
 }

@@ -48,12 +48,9 @@ import net.runelite.client.plugins.PluginDescriptor;
 import net.runelite.client.task.Schedule;
 import net.runelite.client.ui.ClientToolbar;
 import net.runelite.client.ui.NavigationButton;
+import net.runelite.client.util.ImageUtil;
 import net.runelite.api.events.GameStateChanged;
 import net.runelite.api.events.ItemContainerChanged;
-import java.awt.Color;
-import java.awt.Font;
-import java.awt.Graphics2D;
-import java.awt.RenderingHints;
 import java.awt.image.BufferedImage;
 import java.util.ArrayList;
 import java.util.List;
@@ -142,6 +139,50 @@ public class AccountAuditPlugin extends Plugin
 		return configManager.getConfig(AccountAuditConfig.class);
 	}
 
+	// ---------- link token: stored PER RS PROFILE ----------
+	//
+	// A global token would let a second character on the same RuneLite install upload
+	// its progress under the first character's link. Per-profile storage makes that
+	// impossible; tokens issued before this change are migrated on first login.
+
+	private String token()
+	{
+		String t = configManager.getRSProfileConfiguration(AccountAuditConfig.GROUP, AccountAuditConfig.PLUGIN_TOKEN_KEY);
+		return t == null ? "" : t.trim();
+	}
+
+	private void setToken(String token)
+	{
+		configManager.setRSProfileConfiguration(AccountAuditConfig.GROUP, AccountAuditConfig.PLUGIN_TOKEN_KEY, token == null ? "" : token);
+	}
+
+	private void migrateGlobalToken()
+	{
+		String global = config.pluginToken().trim();
+		if (!global.isEmpty() && token().isEmpty())
+		{
+			setToken(global);
+			configManager.setConfiguration(AccountAuditConfig.GROUP, AccountAuditConfig.PLUGIN_TOKEN_KEY, "");
+			log.info("RuneAudit: migrated link token to per-character storage");
+		}
+	}
+
+	/** The API base, or null (with a panel message) if it is not HTTPS and not a local dev server. */
+	private String apiBaseOrNull()
+	{
+		String base = config.apiBase().trim().replaceAll("/+$", "");
+		boolean local = base.startsWith("http://localhost") || base.startsWith("http://127.0.0.1");
+		if (!base.startsWith("https://") && !local)
+		{
+			panel.showStatus("API base URL must be https:// (or a localhost dev server). Check Advanced settings.");
+			return null;
+		}
+		return base;
+	}
+
+	private boolean interestFetchInFlight = false;
+	private long interestRetryAfterMs = 0;
+
 	@Override
 	protected void startUp()
 	{
@@ -162,7 +203,7 @@ public class AccountAuditPlugin extends Plugin
 			() -> clientThread.invokeLater(this::syncBankNow));
 		navButton = NavigationButton.builder()
 			.tooltip("RuneAudit")
-			.icon(drawIcon())
+			.icon(loadIcon())
 			.priority(7)
 			.panel(panel)
 			.build();
@@ -183,19 +224,10 @@ public class AccountAuditPlugin extends Plugin
 		pendingBank = null;
 	}
 
-	/** Programmatic icon — keeps the repo free of binary assets. */
-	private static BufferedImage drawIcon()
+	/** Sidebar icon: the RuneAudit scribe-check badge, shipped as a 16px resource. */
+	private static BufferedImage loadIcon()
 	{
-		BufferedImage img = new BufferedImage(16, 16, BufferedImage.TYPE_INT_ARGB);
-		Graphics2D g = img.createGraphics();
-		g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
-		g.setColor(new Color(0x9C6D0F));
-		g.fillRoundRect(0, 0, 16, 16, 5, 5);
-		g.setColor(new Color(0xFDF6E0));
-		g.setFont(new Font(Font.SERIF, Font.BOLD, 12));
-		g.drawString("A", 4, 12);
-		g.dispose();
-		return img;
+		return ImageUtil.loadImageResource(AccountAuditPlugin.class, "panel_icon.png");
 	}
 
 	@Subscribe
@@ -206,6 +238,9 @@ public class AccountAuditPlugin extends Plugin
 			// Quest states settle a few ticks after login; the scheduled sync picks it up.
 			syncQueued = true;
 			lastLootKeyCount = -1;
+			lastPlayerAggroTick = -1000;
+			migrateGlobalToken();
+			fetchPlan();
 		}
 	}
 
@@ -219,8 +254,9 @@ public class AccountAuditPlugin extends Plugin
 			return;
 		}
 		String text = event.getMessage();
+		// "would have been followed" is the duplicate-pet message: no follower spawns, so
+		// there is nothing safe to record from it.
 		if (text.contains("funny feeling like you're being followed")
-			|| text.contains("funny feeling like you would have been followed")
 			|| text.contains("sneaking into your backpack"))
 		{
 			petCheckTick = client.getTickCount() + 3;
@@ -508,8 +544,18 @@ public class AccountAuditPlugin extends Plugin
 	 */
 	private void fetchItemsOfInterest()
 	{
+		if (interestFetchInFlight || System.currentTimeMillis() < interestRetryAfterMs)
+		{
+			return;
+		}
+		String base = apiBaseOrNull();
+		if (base == null)
+		{
+			return;
+		}
+		interestFetchInFlight = true;
 		Request request = new Request.Builder()
-			.url(config.apiBase() + "/api/items-of-interest")
+			.url(base + "/api/items-of-interest")
 			.get()
 			.build();
 		okHttpClient.newCall(request).enqueue(new Callback()
@@ -517,16 +563,20 @@ public class AccountAuditPlugin extends Plugin
 			@Override
 			public void onFailure(Call call, IOException e)
 			{
+				interestFetchInFlight = false;
+				interestRetryAfterMs = System.currentTimeMillis() + 60_000;
 				log.debug("RuneAudit: items-of-interest fetch failed", e);
 			}
 
 			@Override
 			public void onResponse(Call call, Response response) throws IOException
 			{
+				interestFetchInFlight = false;
 				try (Response r = response)
 				{
 					if (!r.isSuccessful() || r.body() == null)
 					{
+						interestRetryAfterMs = System.currentTimeMillis() + 60_000;
 						return;
 					}
 					JsonObject json = gson.fromJson(r.body().string(), JsonObject.class);
@@ -644,8 +694,13 @@ public class AccountAuditPlugin extends Plugin
 		body.addProperty("accountHash", sha256Hex(Long.toString(accountHash)));
 		body.addProperty("displayName", displayName);
 
+		String base = apiBaseOrNull();
+		if (base == null)
+		{
+			return;
+		}
 		Request request = new Request.Builder()
-			.url(config.apiBase() + "/api/link")
+			.url(base + "/api/link")
 			.post(RequestBody.create(JSON, gson.toJson(body)))
 			.build();
 
@@ -675,7 +730,7 @@ public class AccountAuditPlugin extends Plugin
 					}
 					JsonObject json = gson.fromJson(responseBody, JsonObject.class);
 					String token = json.get("pluginToken").getAsString();
-					configManager.setConfiguration(AccountAuditConfig.GROUP, AccountAuditConfig.PLUGIN_TOKEN_KEY, token);
+					setToken(token);
 					configManager.setConfiguration(AccountAuditConfig.GROUP, AccountAuditConfig.LINK_CODE_KEY, "");
 					panel.setLinked(true);
 					panel.showStatus("Linked as " + displayName + " ✓ — syncing…");
@@ -704,13 +759,18 @@ public class AccountAuditPlugin extends Plugin
 			}
 			return;
 		}
-		final String token = config.pluginToken().trim();
+		final String token = token();
 		if (token.isEmpty())
 		{
 			if (force)
 			{
 				panel.showStatus("Not linked yet — paste a code from the website above and press Link.");
 			}
+			return;
+		}
+		final String base = apiBaseOrNull();
+		if (base == null)
+		{
 			return;
 		}
 
@@ -792,7 +852,7 @@ public class AccountAuditPlugin extends Plugin
 		payload.add("delta", delta);
 
 		Request request = new Request.Builder()
-			.url(config.apiBase() + "/api/ingest")
+			.url(base + "/api/ingest")
 			.header("Authorization", "Bearer " + token)
 			.post(RequestBody.create(JSON, gson.toJson(payload)))
 			.build();
@@ -802,6 +862,7 @@ public class AccountAuditPlugin extends Plugin
 			@Override
 			public void onFailure(Call call, IOException e)
 			{
+				syncQueued = true; // keep the change queued for the next tick
 				panel.showStatus("Sync failed: couldn't reach the server. Will retry automatically.");
 				log.warn("RuneAudit sync failed", e);
 			}
@@ -825,7 +886,10 @@ public class AccountAuditPlugin extends Plugin
 					else if (r.code() == 401)
 					{
 						log.warn("RuneAudit: token revoked; clearing. Re-link from the website.");
-						configManager.setConfiguration(AccountAuditConfig.GROUP, AccountAuditConfig.PLUGIN_TOKEN_KEY, "");
+						if (token.equals(token()))
+						{
+							setToken(""); // only the token this request used — never a newer one
+						}
 						panel.setLinked(false);
 						panel.showStatus("This link was revoked on the website — generate a new code and re-link.");
 						messageLater("RuneAudit: this link was revoked — generate a new code on the website to re-link.");
@@ -837,8 +901,16 @@ public class AccountAuditPlugin extends Plugin
 							panel.showStatus("Synced very recently — wait ~30 seconds and try again.");
 						}
 					}
+					else if (r.code() == 503 && bankToSend != null)
+					{
+						// Server has no bank encryption key: drop the summary so progress isn't blocked.
+						pendingBank = null;
+						syncQueued = true;
+						panel.showStatus("The server refused the bank summary (no encryption key configured) — progress will keep syncing without it.");
+					}
 					else
 					{
+						syncQueued = true;
 						panel.showStatus("Sync failed (HTTP " + r.code() + ") — will retry automatically.");
 						log.warn("RuneAudit sync rejected: {}", r.code());
 					}
@@ -917,11 +989,17 @@ public class AccountAuditPlugin extends Plugin
 
 	private void fetchPlan()
 	{
-		final String token = config.pluginToken().trim();
 		if (panel == null)
 		{
 			return;
 		}
+		if (client.getGameState() != GameState.LOGGED_IN)
+		{
+			panel.setLinked(false);
+			panel.showStatus("Log into a character to see its RuneAudit link.");
+			return;
+		}
+		final String token = token();
 		if (token.isEmpty())
 		{
 			panel.setLinked(false);
@@ -929,8 +1007,13 @@ public class AccountAuditPlugin extends Plugin
 			return;
 		}
 		panel.setLinked(true);
+		final String base = apiBaseOrNull();
+		if (base == null)
+		{
+			return;
+		}
 		Request request = new Request.Builder()
-			.url(config.apiBase() + "/api/plan")
+			.url(base + "/api/plan")
 			.header("Authorization", "Bearer " + token)
 			.get()
 			.build();
@@ -965,15 +1048,22 @@ public class AccountAuditPlugin extends Plugin
 					String planLine = json.has("done")
 						? "Quest route: " + json.get("done").getAsInt() + "/" + json.get("total").getAsInt() + " done"
 						: "Synced.";
-					String suggestionName = null;
-					String suggestionWhy = null;
-					if (json.has("suggestion") && json.get("suggestion").isJsonObject())
+					List<String[]> picks = new ArrayList<>();
+					if (json.has("picks") && json.get("picks").isJsonArray())
+					{
+						for (JsonElement el : json.getAsJsonArray("picks"))
+						{
+							JsonObject p = el.getAsJsonObject();
+							picks.add(new String[]{p.get("name").getAsString(), p.get("why").getAsString()});
+						}
+					}
+					else if (json.has("suggestion") && json.get("suggestion").isJsonObject())
 					{
 						JsonObject s = json.getAsJsonObject("suggestion");
-						suggestionName = s.get("name").getAsString();
-						suggestionWhy = s.get("why").getAsString();
+						picks.add(new String[]{s.get("name").getAsString(), s.get("why").getAsString()});
 					}
-					panel.showPlan(planLine, steps, suggestionName, suggestionWhy);
+					String profileUrl = json.has("profileUrl") && !json.get("profileUrl").isJsonNull() ? json.get("profileUrl").getAsString() : null;
+					panel.showPlan(planLine, steps, picks, profileUrl);
 				}
 			}
 		});
