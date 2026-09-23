@@ -35,7 +35,14 @@ import net.runelite.api.events.GameTick;
 import java.util.Arrays;
 import java.util.LinkedHashSet;
 import net.runelite.api.events.InteractingChanged;
+import net.runelite.api.gameval.InterfaceID;
 import net.runelite.api.gameval.ItemID;
+import net.runelite.api.gameval.VarPlayerID;
+import net.runelite.api.gameval.VarbitID;
+import net.runelite.api.widgets.Widget;
+import net.runelite.client.util.Text;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import net.runelite.client.events.PlayerLootReceived;
 import net.runelite.client.game.ItemStack;
 import net.runelite.client.callback.ClientThread;
@@ -122,6 +129,8 @@ public class AccountAuditPlugin extends Plugin
 	private int lastPlayerAggroTick = -1000;
 	/** Tick at which to look for a new follower after a pet-drop message; -1 = idle. */
 	private int petCheckTick = -1;
+	/** Last Skully dialogue text parsed, so an open dialogue is read once. */
+	private String lastSkullyText = null;
 	/**
 	 * Bank SUMMARY captured on the last bank-open, awaiting the next sync. Opt-in.
 	 * Holds total value, stack counts, and which items-of-interest are present —
@@ -291,6 +300,7 @@ public class AccountAuditPlugin extends Plugin
 	@Subscribe
 	public void onGameTick(GameTick event)
 	{
+		readSkullyDialogue();
 		if (petCheckTick < 0 || client.getTickCount() < petCheckTick)
 		{
 			return;
@@ -472,6 +482,170 @@ public class AccountAuditPlugin extends Plugin
 		pvp.addProperty("lootValueGp", pvpStat("pvpLootGp"));
 		pvp.addProperty("since", Instant.ofEpochMilli(since).toString());
 		return pvp;
+	}
+
+	// ---------- Loot-key lifetime totals, as Skully (Ferox Enclave) reports them ----------
+	//
+	// Asking Skully about loot keys prints the game's own lifetime figures:
+	// "You've claimed N keys, containing loot worth about X gp. You've destroyed Y gp
+	// worth of it." We read that dialogue line when it is on screen — the same text the
+	// player is looking at — and keep the latest figures per character. Nothing is
+	// clicked or sent to the game; it is only as fresh as the last time they asked.
+
+	private static final Pattern SKULLY_CLAIMED = Pattern.compile(
+		"You've claimed ([\\d,]+) keys?, containing loot worth about ([\\d,]+) ?gp");
+	private static final Pattern SKULLY_DESTROYED = Pattern.compile("You've destroyed ([\\d,]+) ?gp worth");
+
+	private static long parseGp(String digits)
+	{
+		try
+		{
+			return Long.parseLong(digits.replace(",", ""));
+		}
+		catch (NumberFormatException e)
+		{
+			return -1L;
+		}
+	}
+
+	private void readSkullyDialogue()
+	{
+		if (!config.pvpTracking())
+		{
+			return;
+		}
+		Widget name = client.getWidget(InterfaceID.ChatLeft.NAME);
+		Widget body = client.getWidget(InterfaceID.ChatLeft.TEXT);
+		if (name == null || body == null || name.isHidden() || body.isHidden()
+			|| !"Skully".equals(Text.removeTags(name.getText())))
+		{
+			return;
+		}
+		String text = Text.removeTags(body.getText().replace("<br>", " ")).replaceAll("\\s+", " ").trim();
+		if (text.equals(lastSkullyText))
+		{
+			return;
+		}
+		lastSkullyText = text;
+
+		long claimed;
+		long value;
+		long destroyed;
+		Matcher m = SKULLY_CLAIMED.matcher(text);
+		if (m.find())
+		{
+			claimed = parseGp(m.group(1));
+			value = parseGp(m.group(2));
+			Matcher d = SKULLY_DESTROYED.matcher(text);
+			if (d.find())
+			{
+				destroyed = parseGp(d.group(1));
+			}
+			else if (text.contains("destroyed everything of value"))
+			{
+				destroyed = value;
+			}
+			else if (text.contains("haven't seen you destroy anything"))
+			{
+				destroyed = 0L;
+			}
+			else
+			{
+				return; // a line we don't recognise — record nothing rather than guess
+			}
+		}
+		else if (text.contains("haven't claimed a key yet"))
+		{
+			claimed = 0L;
+			value = 0L;
+			destroyed = 0L;
+		}
+		else
+		{
+			return;
+		}
+		if (claimed < 0 || value < 0 || destroyed < 0)
+		{
+			return;
+		}
+		configManager.setRSProfileConfiguration(AccountAuditConfig.GROUP, "skullyClaimed", claimed);
+		configManager.setRSProfileConfiguration(AccountAuditConfig.GROUP, "skullyValueGp", value);
+		configManager.setRSProfileConfiguration(AccountAuditConfig.GROUP, "skullyDestroyedGp", destroyed);
+		configManager.setRSProfileConfiguration(AccountAuditConfig.GROUP, "skullyReadAt", System.currentTimeMillis());
+		syncQueued = true;
+		messageLater("RuneAudit: loot-key totals recorded from Skully — " + claimed + " keys.");
+	}
+
+	/** Null until the player has asked Skully at least once with the plugin running. */
+	private JsonObject collectLootKeysLifetime()
+	{
+		if (!config.pvpTracking())
+		{
+			return null;
+		}
+		long readAt = pvpStat("skullyReadAt");
+		if (readAt == 0L)
+		{
+			return null;
+		}
+		JsonObject keys = new JsonObject();
+		keys.addProperty("claimed", pvpStat("skullyClaimed"));
+		keys.addProperty("valueGp", pvpStat("skullyValueGp"));
+		keys.addProperty("destroyedGp", pvpStat("skullyDestroyedGp"));
+		keys.addProperty("readAt", Instant.ofEpochMilli(readAt).toString());
+		return keys;
+	}
+
+	// ---------- Combat Achievements and collection log totals ----------
+
+	/**
+	 * Combat Achievement points and per-tier task counts, from the game's own varbits.
+	 * Null at zero: an all-zero read can't be told apart from varbits that haven't
+	 * loaded yet, and sending it would overwrite a real total with nothing.
+	 */
+	private JsonObject collectCombatAchievements()
+	{
+		int[] tiers = {
+			client.getVarbitValue(VarbitID.CA_TOTAL_TASKS_COMPLETED_EASY),
+			client.getVarbitValue(VarbitID.CA_TOTAL_TASKS_COMPLETED_MEDIUM),
+			client.getVarbitValue(VarbitID.CA_TOTAL_TASKS_COMPLETED_HARD),
+			client.getVarbitValue(VarbitID.CA_TOTAL_TASKS_COMPLETED_ELITE),
+			client.getVarbitValue(VarbitID.CA_TOTAL_TASKS_COMPLETED_MASTER),
+			client.getVarbitValue(VarbitID.CA_TOTAL_TASKS_COMPLETED_GRANDMASTER),
+		};
+		int fromTasks = 0;
+		for (int i = 0; i < tiers.length; i++)
+		{
+			fromTasks += tiers[i] * (i + 1);
+		}
+		int points = Math.max(client.getVarbitValue(VarbitID.CA_POINTS), fromTasks);
+		if (points <= 0)
+		{
+			return null;
+		}
+		JsonObject ca = new JsonObject();
+		ca.addProperty("points", points);
+		String[] names = {"easy", "medium", "hard", "elite", "master", "grandmaster"};
+		for (int i = 0; i < names.length; i++)
+		{
+			ca.addProperty(names[i], tiers[i]);
+		}
+		return ca;
+	}
+
+	/** The in-game collection log count; only populated once the log has been opened. */
+	private JsonObject collectCollectionLog()
+	{
+		int count = client.getVarpValue(VarPlayerID.COLLECTION_COUNT);
+		int max = client.getVarpValue(VarPlayerID.COLLECTION_COUNT_MAX);
+		if (count <= 0 || max <= 0 || count > max)
+		{
+			return null;
+		}
+		JsonObject clog = new JsonObject();
+		clog.addProperty("count", count);
+		clog.addProperty("max", max);
+		return clog;
 	}
 
 	@Subscribe
@@ -851,6 +1025,21 @@ public class AccountAuditPlugin extends Plugin
 		if (pets != null)
 		{
 			delta.add("pets", pets);
+		}
+		JsonObject lootKeys = collectLootKeysLifetime();
+		if (lootKeys != null)
+		{
+			delta.add("lootKeysLifetime", lootKeys);
+		}
+		JsonObject ca = collectCombatAchievements();
+		if (ca != null)
+		{
+			delta.add("combatAchievements", ca);
+		}
+		JsonObject clog = collectCollectionLog();
+		if (clog != null)
+		{
+			delta.add("collectionLog", clog);
 		}
 		// Quest points varp (101) — stable id; gameval constant is VarPlayerID.QP on new APIs.
 		delta.addProperty("questPoints", client.getVarpValue(101));

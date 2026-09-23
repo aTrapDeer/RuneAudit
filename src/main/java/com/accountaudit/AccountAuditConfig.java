@@ -79,7 +79,7 @@ public interface AccountAuditConfig extends Config
 	@ConfigItem(
 		keyName = "pvpTracking",
 		name = "Track PvP record",
-		description = "Counts your player kills (from loot you receive), deaths to players, Wilderness loot keys picked up, and the GE value of PvP loot — from the moment the plugin is installed, so it is an approximation, not a lifetime figure. Sent with progress data.",
+		description = "Counts your player kills (from loot you receive), deaths to players, Wilderness loot keys picked up, and the GE value of PvP loot — from the moment the plugin is installed (an approximation), plus the lifetime loot-key totals Skully in the Ferox Enclave tells you when you ask him. Sent with progress data.",
 		position = 5,
 		section = consentSection
 	)

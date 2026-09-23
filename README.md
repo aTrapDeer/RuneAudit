@@ -9,7 +9,14 @@ name so your pet log fills itself in from install onward.
 
 **PvP record:** counts your player kills, deaths to players, loot keys, and PvP loot value
 from RuneLite's own events, starting when you install — a rough estimate, never a lifetime
-figure, and labelled that way on the site. Toggle it off in settings if you don't want it.
+figure, and labelled that way on the site. For lifetime numbers, talk to Skully in the Ferox
+Enclave and ask about loot keys: the plugin reads the totals he tells you (keys claimed, loot
+value, gp destroyed) off the dialogue and your profile shows those instead. Toggle it all off
+in settings if you don't want it.
+
+**Combat Achievements and collection log:** your CA points (and tasks per tier) and your
+collection log count feed the audit score. Open the collection log once in-game so the count
+is filled in; the hiscores count is used otherwise.
 
 **Bank:** off by default. When you press *Sync bank* (or enable auto-sync), the plugin
 sends a *summary* only — total GE value, stack count, and which items from the public
